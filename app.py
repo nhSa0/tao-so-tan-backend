@@ -6,72 +6,94 @@ import fitz
 app = Flask(__name__)
 CORS(app)
 
-def extract_weights(detail_pdf_path):
-    weights = {}
-    with pdfplumber.open(detail_pdf_path) as pdf:
+def extract_positions_from_pdf(file_path):
+    positions = {}
+    with pdfplumber.open(file_path) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
             if not text:
                 continue
-            for line in text.split('\n'):
-                for part in line.split():
-                    if part.startswith(('F', 'E')):
-                        num = part[1:]
-                        if num.replace('.', '', 1).isdigit():
-                            bay = part.strip()
-                            weight = int(float(num))
-                            weights[bay] = weight
-    print("🎯 DANH SÁCH BAY:", weights)
+            lines = text.split('\n')
+            for line in lines:
+                parts = line.strip().split()
+                if len(parts) >= 3:
+                    bay, row, tier = parts[0:3]
+                    if all(p.isdigit() and len(p) == 2 for p in (bay, row, tier)):
+                        key = f"{bay}{row}{tier}"
+                        positions[key] = True  # chỉ đánh dấu sự tồn tại
+    return positions
+
+def extract_weights(file_path):
+    weights = {}
+    with pdfplumber.open(file_path) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text()
+            if not text:
+                continue
+            lines = text.split('\n')
+            for line in lines:
+                parts = line.strip().split()
+                if len(parts) >= 4:
+                    bay, row, tier = parts[0:3]
+                    weight_candidate = parts[3]
+                    try:
+                        weight = int(float(weight_candidate))
+                        if all(p.isdigit() and len(p) == 2 for p in (bay, row, tier)):
+                            key = f"{bay}{row}{tier}"
+                            weights[key] = weight
+                    except:
+                        continue
     return weights
 
-def process_pdf(layout_pdf_path, weights, output_path):
+def insert_weights(layout_pdf_path, weights, output_pdf_path):
     doc = fitz.open(layout_pdf_path)
-    print("✅ Đã mở file layout")
+    print("📥 Đang chèn số tấn...")
 
-    for page_num, page in enumerate(doc, start=1):
-        print(f"📄 Trang {page_num}")
-        text = page.get_text("text")
-        print("🔍 Nội dung trang:")
-        print(text)
-
-        for bay_code, weight in weights.items():
-            print(f"➡️ Tìm {bay_code}...")
-            found = page.search_for(bay_code)
-            if not found:
-                found = page.search_for(bay_code + ".0")
-            for rect in found:
-                print(f"✅ Ghi {weight} tại {rect} cho {bay_code}")
-                page.insert_textbox(
-                    rect,
-                    str(weight),
-                    fontname="helv",
-                    fontsize=12,
-                    color=(1, 0, 0),
-                    align=1
-                )
-    doc.save(output_path)
-    print("✅ Đã lưu file kết quả:", output_path)
+    for page in doc:
+        blocks = page.get_text("blocks")
+        for block in blocks:
+            x0, y0, x1, y1, text, *_ = block
+            parts = text.strip().split()
+            if len(parts) >= 3:
+                bay, row, tier = parts[0:3]
+                if all(p.isdigit() and len(p) == 2 for p in (bay, row, tier)):
+                    key = f"{bay}{row}{tier}"
+                    if key in weights:
+                        value = str(weights[key])
+                        rect = fitz.Rect(x0, y0, x1, y1)
+                        page.draw_rect(rect, color=(1, 1, 1), fill=(1, 1, 1))  # xóa nền
+                        page.insert_textbox(
+                            rect,
+                            value,
+                            fontsize=12,
+                            fontname="helv",
+                            color=(0, 0, 0),
+                            align=1
+                        )
+                        print(f"✅ {key} → {value} tấn")
+    doc.save(output_pdf_path)
+    print("✅ Đã lưu file PDF kết quả.")
 
 @app.route("/upload", methods=["POST"])
-def upload_file():
+def upload():
     try:
         layout_file = request.files["layout"]
         detail_file = request.files["detail"]
 
-        layout_pdf_path = "/tmp/layout.pdf"
-        detail_pdf_path = "/tmp/detail.pdf"
-        layout_file.save(layout_pdf_path)
-        detail_file.save(detail_pdf_path)
+        layout_path = "/tmp/layout.pdf"
+        detail_path = "/tmp/detail.pdf"
+        result_path = "/tmp/ket_qua.pdf"
 
-        print("📥 Đã nhận file layout và chi tiết")
+        layout_file.save(layout_path)
+        detail_file.save(detail_path)
 
-        weights = extract_weights(detail_pdf_path)
-        output_pdf_path = "/tmp/ket_qua.pdf"
-        process_pdf(layout_pdf_path, weights, output_pdf_path)
+        weights = extract_weights(detail_path)
+        insert_weights(layout_path, weights, result_path)
 
-        return send_file(output_pdf_path, as_attachment=True)
+        return send_file(result_path, as_attachment=True)
+
     except Exception as e:
-        print("❌ LỖI:", str(e))
+        print("❌ Lỗi:", str(e))
         return {"error": str(e)}, 500
 
 if __name__ == "__main__":
