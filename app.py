@@ -25,9 +25,12 @@ def extract_weights(detail_pdf_path):
 
 def process_pdf(layout_pdf_path, weights, output_path):
     doc = fitz.open(layout_pdf_path)
-    for page in doc:
+    for page_num, page in enumerate(doc, start=1):
+        text = page.get_text("text")
+        print(f"\n📄 Trang {page_num} chứa văn bản:")
+        print(text)
+
         for bay_code, weight in weights.items():
-            # Tìm chính xác hoặc có thêm đuôi .0
             found = page.search_for(bay_code)
             if not found:
                 found = page.search_for(bay_code + ".0")
