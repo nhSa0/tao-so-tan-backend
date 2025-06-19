@@ -1,8 +1,10 @@
 from flask import Flask, request, send_file
+from flask_cors import CORS
 import pdfplumber
 import fitz  # PyMuPDF
 
 app = Flask(__name__)
+CORS(app)  # Cho phép gọi từ web khác (CORS)
 
 def extract_weights(detail_pdf_path):
     weights = {}
