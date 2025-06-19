@@ -21,20 +21,26 @@ def extract_weights(detail_pdf_path):
                             bay = part.strip()
                             weight = int(float(num))
                             weights[bay] = weight
+    print("🎯 DANH SÁCH BAY:", weights)
     return weights
 
 def process_pdf(layout_pdf_path, weights, output_path):
     doc = fitz.open(layout_pdf_path)
+    print("✅ Đã mở file layout")
+
     for page_num, page in enumerate(doc, start=1):
+        print(f"📄 Trang {page_num}")
         text = page.get_text("text")
-        print(f"\n📄 Trang {page_num} chứa văn bản:")
+        print("🔍 Nội dung trang:")
         print(text)
 
         for bay_code, weight in weights.items():
+            print(f"➡️ Tìm {bay_code}...")
             found = page.search_for(bay_code)
             if not found:
                 found = page.search_for(bay_code + ".0")
             for rect in found:
+                print(f"✅ Ghi {weight} tại {rect} cho {bay_code}")
                 page.insert_textbox(
                     rect,
                     str(weight),
@@ -44,6 +50,7 @@ def process_pdf(layout_pdf_path, weights, output_path):
                     align=1
                 )
     doc.save(output_path)
+    print("✅ Đã lưu file kết quả:", output_path)
 
 @app.route("/upload", methods=["POST"])
 def upload_file():
@@ -56,12 +63,15 @@ def upload_file():
         layout_file.save(layout_pdf_path)
         detail_file.save(detail_pdf_path)
 
+        print("📥 Đã nhận file layout và chi tiết")
+
         weights = extract_weights(detail_pdf_path)
         output_pdf_path = "/tmp/ket_qua.pdf"
         process_pdf(layout_pdf_path, weights, output_pdf_path)
 
         return send_file(output_pdf_path, as_attachment=True)
     except Exception as e:
+        print("❌ LỖI:", str(e))
         return {"error": str(e)}, 500
 
 if __name__ == "__main__":
