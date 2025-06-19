@@ -27,7 +27,10 @@ def process_pdf(layout_pdf_path, weights, output_path):
     doc = fitz.open(layout_pdf_path)
     for page in doc:
         for bay_code, weight in weights.items():
+            # Tìm chính xác hoặc có thêm đuôi .0
             found = page.search_for(bay_code)
+            if not found:
+                found = page.search_for(bay_code + ".0")
             for rect in found:
                 page.insert_textbox(
                     rect,
