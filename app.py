@@ -2,9 +2,10 @@ from flask import Flask, request, send_file
 from flask_cors import CORS
 import pdfplumber
 import fitz  # PyMuPDF
+import os
 
 app = Flask(__name__)
-CORS(app)  # Cho phép gọi từ web khác (CORS)
+CORS(app)
 
 def extract_weights(detail_pdf_path):
     weights = {}
@@ -26,7 +27,8 @@ def extract_weights(detail_pdf_path):
 def process_pdf(layout_pdf_path, weights, output_path):
     doc = fitz.open(layout_pdf_path)
     for page in doc:
-        for annot in page.annots() or []:
+        annots = list(page.annots() or [])
+        for annot in annots:
             content = annot.info.get("content", "")
             if content in weights:
                 rect = annot.rect
@@ -53,8 +55,14 @@ def upload_file():
         detail_file.save(detail_pdf_path)
 
         weights = extract_weights(detail_pdf_path)
+        if not weights:
+            return {"error": "Không tìm thấy số tấn hợp lệ trong file chi tiết."}, 400
+
         output_pdf_path = "/tmp/ket_qua.pdf"
         process_pdf(layout_pdf_path, weights, output_pdf_path)
+
+        if not os.path.exists(output_pdf_path):
+            return {"error": "Không tạo được file kết quả."}, 500
 
         return send_file(output_pdf_path, as_attachment=True)
     except Exception as e:
