@@ -1,7 +1,9 @@
 from flask import Flask, request, send_file
 from flask_cors import CORS
-import pdfplumber
 import fitz
+import pdfplumber
+import re
+import os
 
 app = Flask(__name__)
 CORS(app)
@@ -9,56 +11,55 @@ CORS(app)
 def extract_weights(file_path):
     weights = {}
     with pdfplumber.open(file_path) as pdf:
-        for page in pdf.pages:
+        for page_num, page in enumerate(pdf.pages):
             text = page.extract_text()
             if not text:
                 continue
             lines = text.split('\n')
-            for line in lines:
-                parts = line.strip().split()
-                if len(parts) >= 4:
-                    bay, row, tier = parts[0:3]
-                    weight_candidate = parts[3]
-                    try:
-                        weight = int(float(weight_candidate))
-                        if all(p.isdigit() and len(p) == 2 for p in (bay, row, tier)):
-                            key = f"{bay}{row}{tier}"
-                            weights[key] = weight
-                    except:
+            for i, line in enumerate(lines):
+                if re.match(r'^[FEfe]\d+(\.\d+)?$', line.strip().split()[0]):
+                    match = re.match(r'[FEfe](\d+)', line.strip())
+                    if not match:
                         continue
+                    weight = int(float(match.group(1)))
+                    # tìm dòng mã xyz phía dưới
+                    for offset in range(1, 4):
+                        if i + offset < len(lines):
+                            line_below = lines[i + offset].strip()
+                            if re.match(r'^\d{6}$', line_below):
+                                weights[line_below] = weight
+                                break
     return weights
 
 def insert_weights(layout_pdf_path, weights, output_pdf_path):
     doc = fitz.open(layout_pdf_path)
-    print("📥 Đang chèn số tấn...")
+    page = doc[0]  # chỉ 1 trang duy nhất
+    blocks = page.get_text("blocks")
 
-    for page_num, page in enumerate(doc, start=1):
-        print(f"📄 Trang {page_num}")
-        blocks = page.get_text("blocks")
-        for block in blocks:
-            x0, y0, x1, y1, text, *_ = block
-            print(f"🔎 Dòng đọc được: {text.strip()}")
-            parts = text.strip().split()
-            if len(parts) >= 3:
-                bay, row, tier = parts[0:3]
-                if all(p.isdigit() and len(p) == 2 for p in (bay, row, tier)):
-                    key = f"{bay}{row}{tier}"
-                    print(f"🔍 Ghép được mã: {key}")
-                    if key in weights:
-                        value = str(weights[key])
-                        rect = fitz.Rect(x0, y0, x1, y1)
-                        page.draw_rect(rect, color=(1, 1, 1), fill=(1, 1, 1))  # xóa chữ cũ
-                        page.insert_textbox(
-                            rect,
-                            value,
-                            fontsize=12,
-                            fontname="helv",
-                            color=(0, 0, 0),
-                            align=1
-                        )
-                        print(f"✅ Ghi {value} tấn vào {key}")
+    for block in blocks:
+        x0, y0, x1, y1, text, *_ = block
+        key = text.strip()
+        if re.match(r"^[a-zA-Z]$", key):  # chỉ 1 chữ cái tạm thời
+            rect = fitz.Rect(x0, y0, x1, y1)
+            center_x = (x0 + x1) / 2
+            center_y = (y0 + y1) / 2
+
+            # xác định vùng cần xóa + chèn nếu mapping có dữ liệu
+            for code, value in weights.items():
+                if (abs(center_x - float(code[0:2])) < 1000 and
+                    abs(center_y - float(code[2:4])) < 1000):  # đơn giản hóa vị trí
+                    page.draw_rect(rect, color=(1, 1, 1), fill=(1, 1, 1))  # xóa chữ cũ
+                    page.insert_textbox(
+                        rect,
+                        str(value),
+                        fontsize=12,
+                        fontname="helv",
+                        color=(0, 0, 0),
+                        align=1
+                    )
+                    break
+
     doc.save(output_pdf_path)
-    print("✅ Đã lưu file PDF kết quả.")
 
 @app.route("/upload", methods=["POST"])
 def upload():
